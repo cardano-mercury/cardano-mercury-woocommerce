@@ -24,14 +24,14 @@ for feature and help requests.
 
 ## Credits
 
-* Adam Dean (@crypto2099)
+* Adam Dean [@crypto2099](https://github.com/crypto2099)
 
 BUFFY Stakepool Owner/Operator Pool
 ID: [000022b3f0b748a43239c5024c58f852c05593cd0a77a798f0bb3a14](https://pooltool.io/pool/000022b3f0b748a43239c5024c58f852c05593cd0a77a798f0bb3a14)
 
-* Latheesan Kanesamoorthy (@latheesan-k)
+* Latheesan Kanesamoorthy [@latheesan-k](https://github.com/latheesan-k)
 
-Special thanks to Latheesan Kanesamoorthy (@latheesan-k) for discussion, backend development, and much, much more!
+Special thanks to Latheesan Kanesamoorthy (@latheesan-k) for discussion, backend development, and much, much more!<br />
 Thanks to JP Birch (https://madinart.io) for the development of the Mercury logo and branding.
 
 
