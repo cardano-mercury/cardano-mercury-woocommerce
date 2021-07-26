@@ -1,0 +1,12 @@
+/.idea/
+/vendor/**/README.md
+/vendor/**/LICENSE
+/vendor/**/composer.json
+/vendor/**/.gitignore
+/vendor/**/phpunit.xml.dist
+/vendor/**/test*
+/vendor/**/CHANGELOG.md
+/vendor/**/.github
+/vendor/guzzlehttp/guzzle/UPGRADING.md
+/vendor/guzzlehttp/promises/Makefile
+/vendor/guzzlehttp/psr7/.php_cs.dist

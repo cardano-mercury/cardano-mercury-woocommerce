@@ -1,0 +1,22 @@
+{
+  "name": "vendor_name/cardano-mercury-woocommerce",
+  "description": "Cardano (Ada) Payment Gateway for WooCommerce",
+  "minimum-stability": "stable",
+  "license": "proprietary",
+  "authors": [
+    {
+      "name": "Adam",
+      "email": "adam@crypto2099.io"
+    }
+  ],
+  "require": {
+    "guzzlehttp/guzzle": "^7.3",
+    "endroid/qr-code": "^4.1",
+    "ext-json": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Mercury\\": "Mercury/"
+    }
+  }
+}
