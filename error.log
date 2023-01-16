@@ -1,0 +1,9 @@
+[15-Jan-2023 20:44:00 UTC] WordPress database error You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'unique key (`lovelace_value`)
+    ) DEFAULT CHARACTER SET utf8mb4 COLLATE ut...' at line 6 for query 
+    CREATE TABLE wp_mercury_order_values (
+        `order_id` int(11) unsigned not null auto_increment,
+        `lovelace_value` bigint unsigned not null,
+        `conversion_rate` decimal(18,6) not null,
+        primary key (`order_id`)
+        unique key (`lovelace_value`)
+    ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci made by activate_plugin, do_action('activate_cardano-mercury-woocommerce/cardano-mercury-woocommerce.php'), WP_Hook->do_action, WP_Hook->apply_filters, setup_mercury_tables, dbDelta
