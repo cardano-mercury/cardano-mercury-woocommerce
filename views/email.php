@@ -1,9 +1,12 @@
 <?php
+if (!defined('ABSPATH')) {
+    die();
+}
 /**
  * Variables referenced within this template
  *
  * @var WC_Gateway_Cardano_Mercury $this
- * @var integer                    $adaTotal
+ * @var integer                    $ADATotal
  * @var array                      $mercury_settings
  * @var WC_Order                   $order
  */
@@ -20,11 +23,11 @@
         Please send your payment to: <strong id="address"><?= $this->walletAddress; ?></strong>
     </p>
     <p>
-        Please send: <strong id="amount"><?= number_format($adaTotal, 6, '.', ''); ?></strong> ₳
+        Please send: <strong id="amount"><?= number_format($ADATotal, 6, '.', ''); ?></strong> ₳
     </p>
     <?php if ($this->orderTimeout): ?>
         <p>
-            You have <?= seconds_to_time($this->orderTimeout); ?> to complete your order. Otherwise, it will be
+            You have <?= $this->seconds_to_time($this->orderTimeout); ?> to complete your order. Otherwise, it will be
             cancelled and you will need to submit your order again.
         </p>
     <?php endif; ?>

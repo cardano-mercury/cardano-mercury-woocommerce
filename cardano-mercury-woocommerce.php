@@ -3,23 +3,32 @@
 /*
 Plugin Name: Cardano Mercury Woocommerce
 Plugin URI: https://crypto2099.io/mercury-woocommerce
-Description: WooCommerce Cardano (Ada) Currency Plugin
+Description: WooCommerce Cardano (ADA) Currency Plugin
 Version: 1.0
-Author: Adam Dean <adam@crypto2099.io>
+Author: Adam Dean <Adam@crypto2099.io>
 Author URI: https://crypto2099.io
 License: GNU General Public License v3.0
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
 */
 
+if (!defined('ABSPATH')) {
+    die();
+}
+
 // Make sure WooCommerce is active
 if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
+    error_log("WooCommerce is not defined yet?");
+
     return;
 }
 
 use Mercury\Pricefeeder;
+use Mercury\Fixer;
 
 require_once 'vendor/autoload.php';
 require_once dirname(__FILE__) . '/lib/action-scheduler/action-scheduler.php';
+require_once dirname(__FILE__) . '/mercury_cron.php';
+include_once dirname(__FILE__) . '/mercury-transaction.php';
 
 // Scaffold out actions for the gateway
 add_action('plugins_loaded', 'scaffold_mercury');
@@ -27,41 +36,23 @@ register_activation_hook(__FILE__, 'mercury_activate');
 register_deactivation_hook(__FILE__, 'mercury_deactivate');
 register_uninstall_hook(__FILE__, 'mercury_uninstall');
 add_filter('woocommerce_payment_gateways', "add_cardano_mercury");
+add_action('init', 'setup_mercury_post_types');
 
-const price_table_name    = 'mercury_order_values';
-const order_payment_table = 'mercury_order_payments';
-const setup_log           = ['source' => 'mercury_setup'];
-const cron_log            = ['source' => 'mercury_cron'];
-const processing_log      = ['source' => 'mercury_processing'];
+const mercury_txn_singular = 'Transaction';
+const mercury_txn_plural   = 'Transactions';
+const mercury_text_domain  = 'cardano-mercury';
+const price_table_name     = 'mercury_order_values';
+const order_payment_table  = 'mercury_order_payments';
+const setup_log            = ['source' => 'mercury_setup'];
+const cron_log             = ['source' => 'mercury_cron'];
+const processing_log       = ['source' => 'mercury_processing'];
 
-require_once dirname(__FILE__) . '/mercury_cron.php';
-
-function lovelace_to_ada($lovelace) {
+function lovelace_to_ADA($lovelace) {
     return $lovelace / 1000000;
 }
 
-function ada_to_lovelace($ada) {
-    return $ada * 1000000;
-}
-
-function seconds_to_time($val) {
-    $options = [
-        '300'   => '5 Minutes',
-        '600'   => '10 Minutes',
-        '1800'  => '30 Minutes',
-        '3600'  => '1 Hour',
-        '7200'  => '2 Hours',
-        '14400' => '4 Hours',
-        '21600' => '6 Hours',
-        '43200' => '12 Hours',
-        '86400' => '24 Hours',
-    ];
-
-    if (isset($options[$val])) {
-        return strtolower($options[$val]);
-    }
-
-    return false;
+function ADA_to_lovelace($ADA) {
+    return $ADA * 1000000;
 }
 
 function scaffold_mercury() {
@@ -75,9 +66,9 @@ function scaffold_mercury() {
     $wpdb->actionscheduler_actions = $wpdb->prefix . 'actionscheduler_actions';
     $wpdb->actionscheduler_groups  = $wpdb->prefix . 'actionscheduler_groups';
 
-    $next_hook = as_has_scheduled_action('mercury_cron_hook');
+    $next_hook = as_has_scheduled_action('mercury_cron_hook', [], 'cardano-mercury');
 
-    if (!$next_hook) {
+    if (!$next_hook && $mercury_settings['cronFrequency'] > 0) {
         $log->info("Next hook not scheduled? What is cron frequency? {$mercury_settings['cronFrequency']}s", setup_log);
         as_schedule_recurring_action(time(), $mercury_settings['cronFrequency'], 'mercury_cron_hook', [],
                                      'cardano-mercury');
@@ -89,7 +80,7 @@ function scaffold_mercury() {
     add_filter('woocommerce_currencies', 'addCardano');
 
     function addCardano($currencies) {
-        $currencies['ADA'] = __('Cardano (Ada)', 'woocommerce');
+        $currencies['ADA'] = __('Cardano (ADA)', 'woocommerce');
 
         return $currencies;
     }
@@ -107,13 +98,15 @@ function scaffold_mercury() {
     // Set up the Mercury payment gateway
     class WC_Gateway_Cardano_Mercury extends WC_Payment_Gateway {
 
-        private $prices_table;
+        private $prices_table, $log;
         public $blockfrostAPIKey, $walletAddress, $currencyConverterAPI;
 
         const options_key = 'woocommerce_cardano_mercury_settings';
 
         public function __construct() {
             global $wpdb;
+
+            $this->log                  = wc_get_logger();
             $this->supports             = [
                 'products',
                 'refunds',
@@ -124,17 +117,19 @@ function scaffold_mercury() {
             $this->icon                 = apply_filters("cardano_mercury_icon", "");
             $this->has_fields           = true;
             $this->method_title         = _x("Cardano Mercury", "Cardano Mercury payment method", "woocommerce");
-            $this->method_description   = __("Accept Cardano (Ada) payments!", "woocommerce");
+            $this->method_description   = __("Accept Cardano (ADA) payments!", "woocommerce");
 
             $this->init_form_fields();
             $this->init_settings();
 
-            $this->title                = $this->get_option('title');
-            $this->description          = $this->get_option('description');
-            $this->blockfrostAPIKey     = $this->get_option('blockfrostAPIKey');
-            $this->walletAddress        = $this->get_option('walletAddress');
-            $this->currencyConverterAPI = $this->get_option('currencyConverterAPI');
-            $this->orderTimeout         = $this->get_option('orderTimeout');
+            $this->title                   = $this->get_option('title');
+            $this->description             = $this->get_option('description');
+            $this->blockfrostAPIKey        = $this->get_option('blockfrostAPIKey');
+            $this->walletAddress           = $this->get_option('walletAddress');
+            $this->currencyConverterAPI    = $this->get_option('currencyConverterAPI');
+            $this->fixerioAPIKey           = $this->get_option('fixerioAPIKey');
+            $this->currencyConversionCache = $this->get_option('currencyConversionCache');
+            $this->orderTimeout            = $this->get_option('orderTimeout');
 
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, [
                 $this,
@@ -166,13 +161,13 @@ function scaffold_mercury() {
                 return true;
             }
 
-            if (empty($options['currencyConverterAPI']) and !in_array(get_woocommerce_currency(), [
-                    'ADA',
-                    'USD',
-                ])) {
-                $log->error("No currency converter API key! " . get_woocommerce_currency(), setup_log);
-
-                return true;
+            if (!in_array(get_woocommerce_currency(), [
+                'ADA',
+                'USD',
+            ])) {
+                if (empty($this->fixerioAPIKey)) {
+                    return true;
+                }
             }
 
             return false;
@@ -184,50 +179,56 @@ function scaffold_mercury() {
             try {
 
                 $curr     = get_woocommerce_currency();
-                $adaPrice = Pricefeeder::getAveragePrice()['price'];
+                $ADAPrice = Pricefeeder::getAveragePrice()['price'];
                 $usdTotal = 0;
 
                 switch ($curr) {
                     case 'ADA':
-                        $adaTotal = $order->get_total();
+                        $ADATotal = $order->get_total();
                         break;
                     case 'USD':
                         $usdTotal = $order->get_total();
                         break;
                     default:
-                        $usdTotal = $this->get_usd($order->get_total(), $curr);
+                        $exchange_rate = $this->get_usd($curr, $this->currencyConversionCache);
+                        if (!$exchange_rate) {
+                            throw new Exception("Could not find exchange rate!");
+                        }
+                        $order->update_meta_data('usd_exchange_rate', $exchange_rate);
+                        $usdTotal = round($order->get_total() * $exchange_rate, 2);
+                        $order->update_meta_data('usd_value', $usdTotal);
                         break;
                 }
 
                 if ($usdTotal) {
-                    $adaTotal = $usdTotal / $adaPrice;
+                    $ADATotal = $usdTotal / $ADAPrice;
                 }
 
-                $adaTotal = round($adaTotal, 6);
+                $ADATotal = round($ADATotal, 6);
 
-                $lovelace_value = $adaTotal * 1000000;
+                $lovelace_value = $ADATotal * 1000000;
                 $recorded       = 0;
                 while (!$recorded) {
-                    $recorded = $this->recordPrice($order_id, $lovelace_value, $adaPrice);
+                    $recorded = $this->recordPrice($order_id, $lovelace_value, $ADAPrice);
                     if (!$recorded) {
                         $lovelace_value++;
                     }
                 }
 
-                $adaTotal = $lovelace_value / 1000000;
+                $ADATotal = $lovelace_value / 1000000;
 
-                update_post_meta($order_id, 'ada_conversion_rate', $adaPrice);
-                update_post_meta($order_id, 'wallet_address', $this->walletAddress);
-                update_post_meta($order_id, 'ada_total', $adaTotal);
-                update_post_meta($order_id, 'lovelace_total', $lovelace_value);
+                $order->update_meta_data('ADA_conversion_rate', $ADAPrice);
+                $order->update_meta_data('wallet_address', $this->walletAddress);
+                $order->update_meta_data('ADA_total', $ADATotal);
+                $order->update_meta_data('lovelace_total', $lovelace_value);
 
                 if ($curr === 'ADA') {
-                    $order->set_total($adaTotal);
+                    $order->set_total($ADATotal);
                 }
 
-                $order_note = sprintf("Awaiting payment of %s Ada to address %s.", $adaTotal, $this->walletAddress);
+                $order_note = sprintf("Awaiting payment of %s ADA to address %s.", $ADATotal, $this->walletAddress);
 
-                WC()->session->set("ada_total", $adaTotal);
+                WC()->session->set("ADA_total", $ADATotal);
                 add_action('woocommerce_email_order_details', [
                     $this,
                     'email_details',
@@ -238,8 +239,7 @@ function scaffold_mercury() {
                 $log = wc_get_logger();
                 $log->info($e->getMessage());
                 $order->update_status('wc-failed', "Error Message: {$e->getMessage()}", processing_log);
-                wc_add_notice(__('Payment error:',
-                                 'woothemes') . "Sorry, we encountered an error attempting to process your order. Please try again later.",
+                wc_add_notice("Sorry, we encountered an error attempting to process your order. Please try again later.",
                               'error');
 
                 return null;
@@ -256,7 +256,7 @@ function scaffold_mercury() {
         }
 
         /**
-         * Convert from the store currency to USD value in order to perform Cardano (Ada) price conversion
+         * Convert from the store currency to USD value in order to perform Cardano (ADA) price conversion
          *
          * @param float  $total
          * @param string $fromCurr
@@ -264,32 +264,47 @@ function scaffold_mercury() {
          *
          * @return float
          */
-        protected function get_usd(float $total, string $fromCurr, int $interval = 300): float {
-            $currency_pair = "{$fromCurr}_USD";
+        protected function get_usd(string $fromCurr, int $interval = 300): float {
+
+            $currency_pair = "Mercury_{$fromCurr}_USD_Price";
 
             $rate = get_transient($currency_pair);
 
             if (!$rate) {
-                $endpoint = "https://free.currconv.com/api/v7/convert?compact=y&apiKey={$this->currencyConverterAPI}&q={$currency_pair}";
-                $response = wp_remote_get($endpoint);
-                if (is_wp_error($response) || $response['response']['code'] !== 200) {
+                $this->log->info("Fixer API Key: {$this->fixerioAPIKey}", processing_log);
+                $Fixer = new Fixer($this->fixerioAPIKey);
+                try {
+                    $result = $Fixer->convert($fromCurr);
+                } catch (Exception $e) {
+                    $this->log->error("Encountered an exception while fetching price data! " . wc_print_r($e,
+                                                                                                          true) . "\r\n" . wc_print_r($this,
+                                                                                                                                      true),
+                                      processing_log);
 
-                    throw new Exception("Could not reach the currency conversion service. Please try again.\r\n{$endpoint}\r\n{$this->currencyConverterAPI}\r\n{$currency_pair}");
+                    return false;
                 }
 
-                $body = json_decode(wp_remote_retrieve_body($response));
-                $rate = $body->{$currency_pair}->val;
+                $rate = $result->data->rates->USD;
+
+                if (!$rate) {
+                    $this->log->error("Count not find the rate for currency conversion? " . wc_print_r($result, true));
+
+                    return false;
+                }
+
                 set_transient($currency_pair, $rate, $interval);
             }
 
-            return round($total * $rate, 2);
+            return $rate;
+
+//            return round($total * $rate, 2);
 
         }
 
         public function email_details($order_id) {
             $mercury_settings = $this->get_options();
             $order            = wc_get_order($order_id);
-            $adaTotal         = $order->get_meta('ada_total');
+            $ADATotal         = $order->get_meta('ADA_total');
 
             include dirname(__FILE__) . '/views/email.php';
         }
@@ -309,67 +324,93 @@ function scaffold_mercury() {
         public function thankyou_page($order_id) {
             $mercury_settings = $this->get_options();
             $Order            = wc_get_order($order_id);
-            $adaTotal         = $Order->get_meta('ada_total');
+            $ADATotal         = $Order->get_meta('ADA_total');
 
             include dirname(__FILE__) . '/views/thank-you.php';
-
         }
 
         public function init_form_fields() {
             $this->form_fields = [
-                'enabled'              => [
+                'enabled'                 => [
                     'title'   => __('Enable/Disable', 'woocommerce'),
                     'type'    => 'checkbox',
-                    'label'   => __('Enable Cardano (Ada) payments', 'woocommerce'),
+                    'label'   => __('Enable Cardano (ADA) payments', 'woocommerce'),
                     'default' => 'no',
                 ],
-                'title'                => [
+                'title'                   => [
                     'title'       => __('Title', 'woocommerce'),
                     'type'        => 'text',
                     'description' => __('This controls the title which user sees during checkout.', 'woocommerce'),
-                    'default'     => _x('Cardano (Ada)', 'Cardano payment method', 'woocommerce'),
+                    'default'     => _x('Cardano (ADA)', 'Cardano payment method', 'woocommerce'),
                     'desc_tip'    => true,
                 ],
-                'description'          => [
+                'description'             => [
                     'title'       => __('Description', 'woocommerce'),
                     'type'        => 'textarea',
                     'description' => __("payment method description that the customer will see on your checkout.",
                                         'woocommerce'),
-                    'default'     => __("Pay with Cardano (Ada)! After placing your order payment details will be displayed."),
+                    'default'     => __("Pay with Cardano (ADA)! After placing your order payment details will be displayed."),
                     'desc_tip'    => true,
                 ],
-                'blockfrostAPIKey'     => [
+                'blockfrostAPIKey'        => [
                     'title'       => __('Blockfrost API Key', 'woocommerce'),
                     'type'        => 'text',
                     'description' => __('Blockfrost Project API Key', 'woocommerce'),
                     'default'     => '',
-                    'desc_tip'    => true,
                 ],
-                'blockfrostMode'       => [
+                'blockfrostMode'          => [
                     'title'       => __('Blockfrost Mode', 'woocommerce'),
                     'type'        => 'select',
                     'description' => __("Choose whether you'd like to run in mainnet or testnet mode.", 'woocommerce'),
                     'default'     => 'mainnet',
                     'options'     => [
                         'mainnet' => 'Mainnet',
-                        'testnet' => 'Testnet',
+                        'preview' => 'Preview',
+                        'preprod' => 'Preprod',
                     ],
                 ],
-                'currencyConverterAPI' => [
+                'currencyConverterAPI'    => [
                     'title'       => __('Free Currency Converter API Key', 'woocommerce'),
                     'type'        => 'text',
                     'description' => __('You can get your own API key at: https://free.currencyconverterapi.com/free-api-key',
                                         'woocommerce'),
                     'default'     => '43d99b69ef9fcd1ae57d',
                 ],
-                'walletAddress'        => [
+                'fixerioAPIKey'           => [
+                    'title'       => __('Fixer.io API Key', 'woocommerce'),
+                    'type'        => 'text',
+                    'description' => __('Get your API key at: https://fixer.io', 'woocommerce'),
+                    'required'    => true,
+                ],
+                'currencyConversionCache' => [
+                    'title'       => __('Currency Conversion Cache Length', 'woocommerce'),
+                    'type'        => 'select',
+                    'description' => __('The time to keep the latest currency conversion rates in the WordPress cache before fetching new data. If using the Fixer.io free tier we recommend a setting of at least 8 hours.',
+                                        'woocommerce'),
+                    'required'    => true,
+                    'default'     => '28800',
+                    'options'     => [
+                        '60'    => '1 Minute',
+                        '120'   => '2 Minutes',
+                        '300'   => '5 Minutes',
+                        '600'   => '10 Minutes',
+                        '1800'  => '30 Minutes',
+                        '3600'  => '1 Hour',
+                        '7200'  => '2 Hours',
+                        '14400' => '4 Hours',
+                        '28800' => '8 Hours',
+                        '43200' => '12 Hours',
+                        '86400' => '1 Day',
+                    ],
+                ],
+                'walletAddress'           => [
                     'title'       => __('Shelley Wallet Address', 'woocommerce'),
                     'type'        => 'text',
                     'description' => __('Cardano Shelley wallet address', 'woocommerce'),
                     'default'     => '',
                     'desc_tip'    => true,
                 ],
-                'cronFrequency'        => [
+                'cronFrequency'           => [
                     'title'       => __('Order Polling Frequency', 'woocommerce'),
                     'type'        => 'select',
                     'description' => __('The frequency at which we will poll for paid orders. Checking more frequently will use more API requests from your plan.',
@@ -385,7 +426,7 @@ function scaffold_mercury() {
                         '3600' => 'Once per hour',
                     ],
                 ],
-                'orderTimeout'         => [
+                'orderTimeout'            => [
                     'title'       => __('Order Timeout', 'woocommerce'),
                     'type'        => 'select',
                     'description' => __('This is the time to keep orders on hold before cancelling them due to non-payment.',
@@ -412,14 +453,45 @@ function scaffold_mercury() {
 
             $post_data = $this->get_post_data();
 
-            if ($post_data['woocommerce_cardano_mercury_cronFrequency']) {
+            $newCronFrequency     = $post_data['woocommerce_cardano_mercury_cronFrequency'];
+            $currentCronFrequency = $this->get_option('cronFrequency');
+
+            $newWalletAddress     = $post_data['woocommerce_cardano_mercury_walletAddress'];
+            $currentWalletAddress = $this->get_option('walletAddress');
+
+            if ($newWalletAddress and $currentWalletAddress != $newWalletAddress) {
+                as_schedule_single_action(time(), 'mercury_wallet_sync', [$newWalletAddress], 'cardano-mercury');
+            }
+
+            if ($newCronFrequency and $newCronFrequency != $currentCronFrequency) {
 
                 as_unschedule_all_actions('mercury_cron_hook');
-                as_schedule_recurring_action(time(), $post_data['woocommerce_cardano_mercury_cronFrequency'],
-                                             'mercury_cron_hook', [], 'cardano-mercury');
+                as_schedule_recurring_action(time(), $newCronFrequency, 'mercury_cron_hook', [], 'cardano-mercury');
             }
 
             parent::process_admin_options();
+        }
+
+        private function seconds_to_time($val) {
+            $options = [
+                '60'    => '1 Minutes',
+                '120'   => '2 Minutes',
+                '300'   => '5 Minutes',
+                '600'   => '10 Minutes',
+                '1800'  => '30 Minutes',
+                '3600'  => '1 Hour',
+                '7200'  => '2 Hours',
+                '14400' => '4 Hours',
+                '21600' => '6 Hours',
+                '43200' => '12 Hours',
+                '86400' => '24 Hours',
+            ];
+
+            if (isset($options[$val])) {
+                return strtolower($options[$val]);
+            }
+
+            return false;
         }
     }
 }
@@ -429,6 +501,7 @@ function scaffold_mercury() {
  */
 function mercury_activate() {
     setup_mercury_tables();
+
 }
 
 function setup_mercury_tables() {

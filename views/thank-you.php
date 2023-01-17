@@ -1,9 +1,12 @@
 <?php
+if (!defined('ABSPATH')) {
+    die();
+}
 /**
  * Variables referenced within this template
  *
  * @var WC_Gateway_Cardano_Mercury $this
- * @var integer                    $adaTotal
+ * @var integer                    $ADATotal
  * @var array                      $mercury_settings
  * @var WC_Order                   $Order
  */
@@ -48,8 +51,14 @@
             <p style="word-wrap: break-word;">
                 Total (click amount to copy): <span class="woocommerce-Price-amount amount">
                                     <span class="no-copy">₳</span>
-                    <span class="all-copy" id="ada-total"><?= number_format($adaTotal, 6, '.', ''); ?></span>
+                    <span class="all-copy" id="ADA-total"><?= number_format($ADATotal, 6, '.', ''); ?></span>
                                 </span>
+            </p>
+        </li>
+        <li class="woocommerce-order-overview__timeout">
+            <p>
+                You have <?= $this->seconds_to_time($this->orderTimeout); ?> from the time your order was submitted to
+                complete your payment. Otherwise, your order will be cancelled.
             </p>
         </li>
         <?php if ($Order->has_status('on-hold')): ?>
@@ -154,7 +163,7 @@ data;
             lucid.selectWallet(api);
 
             const tx = await lucid.newTx()
-                    .payToAddress($('#wallet-address').html(), {lovelace: $('#ada-total').html() * 1000000})
+                    .payToAddress($('#wallet-address').html(), {lovelace: $('#ADA-total').html() * 1000000})
                     .complete();
 
             const signedTx = await tx.sign().complete();

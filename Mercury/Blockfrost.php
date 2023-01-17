@@ -60,10 +60,22 @@ class Blockfrost {
         return $result->data->is_healthy;
     }
 
+    public function getTransactions($address, $page = 1, $order = 'desc') {
+        return $this->get("addresses/{$address}/transactions", [
+            'query' => [
+                'page'  => $page,
+                'order' => $order,
+            ],
+        ]);
+    }
+
     public function getAddressUTXO($address, $page = 1) {
         return $this->get("addresses/{$address}/utxos", [
-                                                          'query' => ['page' => $page],
-                                                      ]);
+            'query' => [
+                'page'  => $page,
+                'order' => 'desc',
+            ],
+        ]);
     }
 
     public function getAllAddressUTXO($address) {
