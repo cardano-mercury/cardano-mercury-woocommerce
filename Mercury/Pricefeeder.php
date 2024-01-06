@@ -9,7 +9,7 @@ class Pricefeeder {
 
     const hitbtc_url = 'https://api.hitbtc.com/api/2/public/ticker/ADAUSD';
     const coingecko_url = 'https://api.coingecko.com/api/v3/simple/price?ids=cardano&vs_currencies=usd';
-    const bittrex_url = 'https://api.bittrex.com/v3/markets/ADA-USD/ticker';
+//    const bittrex_url = 'https://api.bittrex.com/v3/markets/ADA-USD/ticker';
 
     private static function getPrice($url) {
         $client = new Client();
@@ -44,15 +44,15 @@ class Pricefeeder {
         return $data->cardano->usd;
     }
 
-    private static function getBittrexPrice() {
-        try {
-            $data = self::getPrice(self::bittrex_url);
-        } catch (GuzzleException $e) {
-            throw $e;
-        }
-
-        return $data->lastTradeRate;
-    }
+//    private static function getBittrexPrice() {
+//        try {
+//            $data = self::getPrice(self::bittrex_url);
+//        } catch (GuzzleException $e) {
+//            throw $e;
+//        }
+//
+//        return $data->lastTradeRate;
+//    }
 
     public static function getAveragePrice() {
         try {
@@ -67,16 +67,17 @@ class Pricefeeder {
             throw $e;
         }
 
-        try {
-            $bittrex = self::getBittrexPrice();
-        } catch (GuzzleException $e) {
-            throw $e;
-        }
+        // Bittrex shut down in late 2023
+//        try {
+//            $bittrex = self::getBittrexPrice();
+//        } catch (GuzzleException $e) {
+//            throw $e;
+//        }
 
         $prices = array_filter([
                                    $hitbtc,
                                    $coingecko,
-                                   $bittrex,
+//                                   $bittrex,
                                ]);
 
         $avg_price = round(array_sum($prices) / count($prices), 6);
@@ -85,7 +86,7 @@ class Pricefeeder {
             'price'     => $avg_price,
             'hitbtc'    => $hitbtc,
             'coingecko' => $coingecko,
-            'bittrex'   => $bittrex,
+//            'bittrex'   => $bittrex,
         ];
 
     }

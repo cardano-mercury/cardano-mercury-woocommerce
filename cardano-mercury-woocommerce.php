@@ -4,7 +4,7 @@
 Plugin Name: Cardano Mercury Woocommerce
 Plugin URI: https://crypto2099.io/mercury-woocommerce
 Description: WooCommerce Cardano (ADA) Currency Plugin
-Version: 1.0
+Version: 2.0
 Author: Adam Dean <Adam@crypto2099.io>
 Author URI: https://crypto2099.io
 License: GNU General Public License v3.0
@@ -245,10 +245,26 @@ function scaffold_mercury() {
                 return null;
             }
 
+            // https://cnftcon.io/attendee-registration/order-received/8118/?tickets_provider=tribe_wooticket&key=wc_order_RtQGgVfzlnTA1
+
+            $return_url = $this->get_return_url($order);
+            $return_url = str_replace('attendee-registration','checkout', $return_url);
+            $return_url = str_replace('tickets_provider=tribe_wooticket&', '', $return_url);
+
             return [
                 'result'   => 'success',
-                'redirect' => $this->get_return_url($order),
+                'redirect' => $return_url,
             ];
+
+            // public function get_return_url( $order = null ) {
+            //		if ( $order ) {
+            //			$return_url = $order->get_checkout_order_received_url();
+            //		} else {
+            //			$return_url = wc_get_endpoint_url( 'order-received', '', wc_get_checkout_url() );
+            //		}
+            //
+            //		return apply_filters( 'woocommerce_get_return_url', $return_url, $order );
+            //	}
         }
 
         public function can_refund_order($order): bool {
