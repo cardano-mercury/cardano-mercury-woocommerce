@@ -40,6 +40,28 @@ class TaskManager {
         ]);
     }
 
+    public static function maybeSchedule($task, $frequency) {
+        $next_hook = as_has_scheduled_action($task, [], 'cardano-mercury');
+        if ($next_hook) {
+            return;
+        } else {
+            as_schedule_recurring_action(time(), $frequency, $task, [], 'cardano-mercury');
+        }
+    }
+
+    public static function scheduleOnce($task, $args) {
+        as_schedule_single_action(time(), $task, $args, 'cardano-mercury');
+    }
+
+    public static function reschedule($task, $frequency) {
+        $next_hook = as_has_scheduled_action($task, [], 'cardano-mercury');
+        if ($next_hook) {
+            as_unschedule_all_actions($task, [], 'cardano-mercury');
+        }
+        as_schedule_recurring_action(time(), $frequency, $task, [], 'cardano-mercury');
+
+    }
+
     public function Blockfrost() {
         if (!$this->blockfrostClient) {
             if (!$this->blockfrostMode) {
@@ -122,11 +144,11 @@ class TaskManager {
         $this->write("Looking for addresses to gather transactions for.", self::LOG_DEBUG);
 
         $pending_orders = get_posts([
-                                        'post_type'   => 'shop_order',
-                                        'post_status' => 'wc-on-hold',
-                                        'meta_key'    => '_payment_method',
-                                        'meta_value'  => 'cardano_mercury',
-                                    ]);
+            'post_type'   => 'shop_order',
+            'post_status' => 'wc-on-hold',
+            'meta_key'    => '_payment_method',
+            'meta_value'  => 'cardano_mercury',
+        ]);
 
         $addresses_to_check = [
             $this->defaultAddress,
@@ -140,7 +162,7 @@ class TaskManager {
         $addresses_to_check = array_unique($addresses_to_check);
 
         $this->write("Found " . count($addresses_to_check) . " addresses to check for transactions...",
-                     self::LOG_DEBUG);
+            self::LOG_DEBUG);
 
         foreach ($addresses_to_check as $address) {
             $page = 1;
@@ -210,7 +232,7 @@ class TaskManager {
                   AND meta_value = %s", $payment->post_title));
                 if ($in_use) {
                     $this->write("The specified transaction hash is already in use by Order #{$in_use}",
-                                 self::LOG_INFO);
+                        self::LOG_INFO);
                     continue;
                 }
 
@@ -218,7 +240,7 @@ class TaskManager {
                 $Order->payment_complete($payment->post_title);
                 $Order->update_meta_data('tx_hash', $payment->post_title);
                 $orderNote = sprintf("Order payment of %s verified at %s. Transaction ID: %s", $ada_total . " ADA",
-                                     $payment->post_date_gmt, $payment->post_title);
+                    $payment->post_date_gmt, $payment->post_title);
                 $Order->add_order_note($orderNote);
                 $Order->update_meta_data('input_address', get_post_meta($payment->ID, 'received_from', true));
                 continue;
@@ -230,16 +252,16 @@ class TaskManager {
 
         if ($this->orderTimeout) {
             $expired = get_posts([
-                                     'post_type'   => 'shop_order',
-                                     'post_status' => 'wc-on-hold',
-                                     'meta_key'    => '_payment_method',
-                                     'meta_value'  => 'cardano_mercury',
-                                     'date_query'  => [
-                                         'before' => '-' . self::seconds_to_time($this->orderTimeout),
-                                     ],
-                                     'nopaging'    => true,
-                                     'order'       => 'ASC',
-                                 ]);
+                'post_type'   => 'shop_order',
+                'post_status' => 'wc-on-hold',
+                'meta_key'    => '_payment_method',
+                'meta_value'  => 'cardano_mercury',
+                'date_query'  => [
+                    'before' => '-' . self::seconds_to_time($this->orderTimeout),
+                ],
+                'nopaging'    => true,
+                'order'       => 'ASC',
+            ]);
 
             if (!empty($expired)) {
                 $this->write("EXPIRED ORDERS");
@@ -304,7 +326,7 @@ note;
             $page++;
         }
         $this->write("Done syncing wallet orders after {$page} pages of results. Processed: {$total_processed} Skipped: {$total_skipped}",
-                     self::LOG_DEBUG);
+            self::LOG_DEBUG);
     }
 
     public function transactionExists($tx_hash) {
@@ -340,7 +362,7 @@ note;
 
         if ($txn_details['lovelace'] === 0) {
             $this->write("We received no funds from this transaction, probably sending funds out. Skip it!",
-                         self::LOG_DEBUG);
+                self::LOG_DEBUG);
 
             return 0;
         }

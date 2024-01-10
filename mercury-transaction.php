@@ -3,7 +3,7 @@ if (!defined('ABSPATH')) {
     die();
 }
 
-function setup_mercury_post_types() {
+function setup_mercury_transaction_post_type() {
 
     $txn_post_type_arguments = [
         'label'               => 'Cardano Transaction',
