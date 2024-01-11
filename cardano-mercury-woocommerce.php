@@ -206,16 +206,11 @@ function scaffold_mercury() {
         }
 
         public function payment_fields() {
-//            global $order;
-//            echo wpautop(print_r($order, true));
             $cart_data  = WC()->cart;
             $cart_total = $cart_data->get_totals()['total'];
             $curr       = get_woocommerce_currency();
 
-//            echo wpautop("Cart Total: {$cart_total} {$curr}");
-
             $ADAPrice = Pricefeeder::getAveragePrice()['price'];
-//            echo wpautop("ADA Price: {$ADAPrice} USD");
 
             switch ($curr) {
                 case 'ADA':
@@ -229,17 +224,13 @@ function scaffold_mercury() {
                     if (!$exchange_rate) {
                         throw new Exception("Could not find exchange rate!");
                     }
-//                    echo wpautop("{$curr}:USD Rate: {$exchange_rate}");
                     $usd_total = round($cart_total * $exchange_rate, 2);
                     break;
             }
 
             if ($usd_total) {
-//                echo wpautop(wp_kses_post("USD Cart Total: {$usd_total}"));
                 $ada_total = $usd_total / $ADAPrice;
             }
-
-//            echo wpautop(wp_kses_post("ADA Total: {$ada_total}"));
 
             echo wpautop(wp_kses_post($this->description));
             $accepted_native_assets = get_posts([
@@ -253,7 +244,7 @@ function scaffold_mercury() {
                 $currencies = [
                         [
                                 'name'     => "ADA &#8371;",
-                                'unit'     => 'lovelace',
+                                'unit'     => 'ada',
                                 'decimals' => 6,
                                 'price'    => $ada_total,
                         ],
@@ -264,70 +255,195 @@ function scaffold_mercury() {
                     if ($currency_price <= 0) {
                         continue;
                     }
+
+                    $ada_offset = (1168010 + ((strlen($token->post_title) - 56) * 4310)) / 1000000;
+
                     $currencies[] = [
                             'name'     => '$' . get_post_meta($token->ID, 'ticker', true),
                             'unit'     => $token->post_title,
                             'decimals' => (int)get_post_meta($token->ID, 'decimals', true),
-                            'price'    => $ada_total / (float)$currency_price,
+                            'price'    => ($ada_total - $ada_offset) / (float)$currency_price,
                     ];
                 }
 
                 if (count($currencies) > 1) {
-                    echo '<label for="cardano_currency">Choose the Cardano native asset you will use to pay</label>';
-                    echo '<select name="cardano_currency" id="cardano_currency">';
-                    foreach ($currencies as $token) {
-                        $selected = ($token['name'] === "Lovelace");
-                        echo '<option value="' . $token['name'] . '" ' . ($selected ? 'selected="selected"' : '') . '>' . $token['name'] . ' (' . round($token['price'],
-                                        $token['decimals']) . ')</option>';
-                    }
-                    echo '</select>';
+                    ?>
+                    <div class="native-asset-selection">
+                        <p class="form-row form-row-wide native-asset-selection">
+                            <label for="cardano_currency">
+                                <?= __("Choose the Cardano Native Asset you will use to pay", mercury_text_domain); ?>
+                            </label>
+                            <select name="cardano_currency" id="cardano_currency">
+                                <?php
+                                foreach ($currencies as $token) {
+                                    $selected = ($token['unit'] === "ada");
+                                    ?>
+                                    <option value="<?= $token['unit']; ?>"
+                                            <?= ($selected ? 'selected="selected"' : ''); ?>><?= $token['name'] . ' (' . round($token['price'],
+                                                $token['decimals']) . ')'; ?>
+                                    </option>
+                                    <?php
+                                }
+                                ?>
+                            </select>
+                        </p>
+                        <p class="form-row form-row-wide" id="minUTxO">
+                            Note: if using a Native Asset other than ADA (&#8371;) for payment, your total amount due
+                            reflects a minimum amount of ADA (minUTxO) required to accompany the native asset of your
+                            choosing.
+                        </p>
+                        <!--                        <p class="form-row form-row-wide">-->
+                        <!--                            Total Price: --><?php
+                        //= $cart_total; ?><!-- --><?php
+                        //= $curr; ?>
+                        <!--                            <br/>-->
+                        <!--                            Conversion Rate: --><?php
+                        //= $exchange_rate; ?><!-- USD : 1 --><?php
+                        //= $curr; ?>
+                        <!--                            <br/>-->
+                        <!--                            USD Total Price: --><?php
+                        //= $usd_total; ?><!-- USD-->
+                        <!--                            <br/>-->
+                        <!--                            ADA Price: --><?php
+                        //= $ADAPrice; ?><!-- USD-->
+                        <!--                            <br/>-->
+                        <!--                            ADA Total Price: --><?php
+                        //= round($ada_total, 6); ?><!-- &#8371;-->
+                        <!--                        </p>-->
+                    </div>
+                    <?php
                 }
-//
-//                echo "<pre>";
-//                print_r($currencies);
-//                echo "</pre>";
             } else {
                 ?>
-                <input type="hidden" name="ada_currency" id="ada_currency" value="lovelace"/>
+                <input type="hidden" name="cardano_currency" id="ada_currency" value="ada"/>
                 <?php
             }
         }
 
-        public function process_payment($order_id) {
+        public function validate_fields() {
+            $log = wc_get_logger();
+            $log->debug("Validating Form Fields!\r\n" . print_r($_POST, true), processing_log);
+            if ($_POST['payment_method'] === 'cardano_mercury') {
+                switch ($_POST['cardano_currency']) {
+                    case 'ada':
+                        // Pure-ADA payment
+                        return true;
+                    default:
+                        $token_id = post_exists($_POST['cardano_currency'], '', '', 'mercury-native-asset');
+                        if (!$token_id) {
+                            wc_add_notice("Invalid payment method chosen! Please try again.");
+
+                            return false;
+                        }
+                        $price = get_post_meta($token_id, 'price', true);
+                        if ($price <= 0) {
+                            wc_add_notice("Sorry, we don't currently have any price information for that token and cannot process your order at this time.");
+
+                            return false;
+                        }
+                }
+            }
+
+            return true;
+        }
+
+        public function process_payment($order_id): ?array {
             $order = wc_get_order($order_id);
+            $log   = wc_get_logger();
+
+            $cardano_currency = sanitize_text_field($_POST['cardano_currency']);
+
+            $order->update_meta_data('cardano_currency', $cardano_currency);
+
+            $curr = get_woocommerce_currency();
+
+            $usdTotal = 0;
 
             try {
-
-                $curr     = get_woocommerce_currency();
                 $ADAPrice = Pricefeeder::getAveragePrice()['price'];
-                $usdTotal = 0;
+            } catch (Throwable $e) {
+                wc_add_notice("Sorry, we're having technical difficulties fetching current ADA price. Please try again later.");
+                $order->update_status('wc-failed', "Error Message: {$e->getMessage()}", processing_log);
+                $log->error("Could not fetch ADA Price Details?\r\n{$e->getMessage()}", processing_log);
 
-                switch ($curr) {
-                    case 'ADA':
-                        $ADATotal = $order->get_total();
-                        break;
-                    case 'USD':
-                        $usdTotal = $order->get_total();
-                        break;
-                    default:
-                        $exchange_rate = $this->get_usd($curr, $this->currencyConversionCache);
-                        if (!$exchange_rate) {
-                            throw new Exception("Could not find exchange rate!");
-                        }
-                        $order->update_meta_data('usd_exchange_rate', $exchange_rate);
-                        $usdTotal = round($order->get_total() * $exchange_rate, 2);
-                        $order->update_meta_data('usd_value', $usdTotal);
-                        break;
+                return null;
+            }
+
+            if (!$ADAPrice) {
+                wc_add_notice("Sorry, we're having technical difficulties fetching current ADA price. Please try again later.");
+                $order->update_status('wc-failed', "ADA Price is 0");
+                $log->error("ADA Price is 0?!", processing_log);
+
+                return null;
+            }
+
+            $ADATotal = 0;
+
+            switch ($curr) {
+                case 'ADA':
+                    $ADATotal = $order->get_total();
+                    break;
+                case 'USD':
+                    $usdTotal = $order->get_total();
+                    break;
+                default:
+                    $exchange_rate = $this->get_usd($curr, $this->currencyConversionCache);
+                    if (!$exchange_rate) {
+                        throw new Exception("Could not find exchange rate!");
+                    }
+                    $order->update_meta_data('usd_exchange_rate', $exchange_rate);
+                    $usdTotal = round($order->get_total() * $exchange_rate, 2);
+                    $order->update_meta_data('usd_value', $usdTotal);
+                    break;
+            }
+
+            if (!$ADATotal) {
+                wc_add_notice("Sorry, we're having technical difficulties fetching current ADA price. Please try again later.");
+                $order->update_status('wc-failed', "ADA Total Price is 0");
+                $log->error("ADA Price is 0?! {$ADATotal} {$usdTotal}", processing_log);
+
+                return null;
+            }
+
+            if ($usdTotal) {
+                $ADATotal = $usdTotal / $ADAPrice;
+            }
+
+            $ADATotal = round($ADATotal, 6);
+
+            $lovelace_value = $ADATotal * 1000000;
+            $recorded       = 0;
+            $order->update_meta_data('wallet_address', $this->walletAddress);
+            $order->update_meta_data('ADA_conversion_rate', $ADAPrice);
+            $order->update_meta_data('ADA_total', $ADATotal);
+
+            if ($cardano_currency !== 'ada') {
+                $token = NativeAsset::getToken($cardano_currency);
+                $log->debug("Found token?\r\n" . print_r($token, true), processing_log);
+                if (!$token || (float)$token->price <= 0) {
+                    wc_add_notice("Could not locate the Native Asset you selected for payment. Sorry. Please try again.");
                 }
 
-                if ($usdTotal) {
-                    $ADATotal = $usdTotal / $ADAPrice;
-                }
+                // TODO: Record ADA + Native Asset price here...
 
-                $ADATotal = round($ADATotal, 6);
+                $ada_offset  = (1168010 + ((strlen($token->post_title) - 56) * 4310)) / 1000000;
+                $token_price = ($ADATotal - $ada_offset) / (float)$token->price;
 
-                $lovelace_value = $ADATotal * 1000000;
-                $recorded       = 0;
+                $order->update_meta_data('ADA_minUTxO', $ada_offset);
+
+                // TODO: Need to update the prices table to have fields for native asset policy_id, asset_id, and quantity
+
+//                $currencies[] = [
+//                        'name'     => '$' . get_post_meta($token->ID, 'ticker', true),
+//                        'unit'     => $token->post_title,
+//                        'decimals' => (int)get_post_meta($token->ID, 'decimals', true),
+//                        'price'    => ($ada_total - $ada_offset) / (float)$currency_price,
+//                ];
+
+//                while (!$recorded) {
+//                    $recorded = $this->recordPrice($order_id, $lovelace_value, $ADAPrice);
+//                }
+            } else {
                 while (!$recorded) {
                     $recorded = $this->recordPrice($order_id, $lovelace_value, $ADAPrice);
                     if (!$recorded) {
@@ -337,32 +453,19 @@ function scaffold_mercury() {
 
                 $ADATotal = $lovelace_value / 1000000;
 
-                $order->update_meta_data('ADA_conversion_rate', $ADAPrice);
-                $order->update_meta_data('wallet_address', $this->walletAddress);
-                $order->update_meta_data('ADA_total', $ADATotal);
                 $order->update_meta_data('lovelace_total', $lovelace_value);
 
-                if ($curr === 'ADA') {
-                    $order->set_total($ADATotal);
-                }
-
                 $order_note = sprintf("Awaiting payment of %s ADA to address %s.", $ADATotal, $this->walletAddress);
-
                 WC()->session->set("ADA_total", $ADATotal);
                 add_action('woocommerce_email_order_details', [
                         $this,
                         'email_details',
                 ], 10, 4);
                 $order->update_status('wc-on-hold', $order_note);
+            }
 
-            } catch (Exception $e) {
-                $log = wc_get_logger();
-                $log->info($e->getMessage());
-                $order->update_status('wc-failed', "Error Message: {$e->getMessage()}", processing_log);
-                wc_add_notice("Sorry, we encountered an error attempting to process your order. Please try again later.",
-                        'error');
-
-                return null;
+            if ($curr === 'ADA') {
+                $order->set_total($ADATotal);
             }
 
             // https://cnftcon.io/attendee-registration/order-received/8118/?tickets_provider=tribe_wooticket&key=wc_order_RtQGgVfzlnTA1
@@ -375,16 +478,6 @@ function scaffold_mercury() {
                     'result'   => 'success',
                     'redirect' => $return_url,
             ];
-
-            // public function get_return_url( $order = null ) {
-            //		if ( $order ) {
-            //			$return_url = $order->get_checkout_order_received_url();
-            //		} else {
-            //			$return_url = wc_get_endpoint_url( 'order-received', '', wc_get_checkout_url() );
-            //		}
-            //
-            //		return apply_filters( 'woocommerce_get_return_url', $return_url, $order );
-            //	}
         }
 
         public function can_refund_order($order): bool {

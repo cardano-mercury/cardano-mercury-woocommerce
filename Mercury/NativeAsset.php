@@ -180,6 +180,21 @@ eof, mercury_text_domain));
         Taskmanager::scheduleOnce('mercury_get_price', compact('post_id'));
     }
 
+    public static function getToken($unit) {
+        $token_id = post_exists($unit, '', '', self::mercury_native_asset_post_type);
+        if (!$token_id) {
+            return false;
+        }
+
+        $token      = get_post($token_id);
+        $token_meta = get_post_meta($token_id);
+        foreach ($token_meta as $key => $value) {
+            $token->{$key} = $value[0];
+        }
+
+        return $token;
+    }
+
     public static function fetch_asset_details() {
         $log = wc_get_logger();
         $log->info("Fetching asset details!", self::cron_log);
@@ -465,14 +480,14 @@ eof, mercury_text_domain));
 //                        'read'                   => true,
 //                        'read_private_pages'     => true,
 //                        'read_private_posts'     => true,
-                        'delete_posts'           => false,
-                        'delete_pages'           => false,
-                        'delete_private_pages'   => false,
-                        'delete_private_posts'   => false,
-                        'delete_published_pages' => false,
-                        'delete_published_posts' => false,
-                        'delete_others_pages'    => false,
-                        'delete_others_posts'    => false,
+'delete_posts'           => false,
+'delete_pages'           => false,
+'delete_private_pages'   => false,
+'delete_private_posts'   => false,
+'delete_published_pages' => false,
+'delete_published_posts' => false,
+'delete_others_pages'    => false,
+'delete_others_posts'    => false,
 //                        'edit_others_pages'      => true,
 //                        'edit_others_posts'      => true,
 //                        'edit_pages'             => true,
