@@ -25,11 +25,12 @@ if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get
 use Mercury\Fixer;
 use Mercury\NativeAsset;
 use Mercury\Pricefeeder;
+use Mercury\Transaction;
 
 require_once 'vendor/autoload.php';
 require_once dirname(__FILE__) . '/lib/action-scheduler/action-scheduler.php';
 require_once dirname(__FILE__) . '/mercury_cron.php';
-include_once dirname(__FILE__) . '/mercury-transaction.php';
+//include_once dirname(__FILE__) . '/mercury-transaction.php';
 require_once dirname(__FILE__) . '/mercury-asset.php';
 
 // Scaffold out actions for the gateway
@@ -39,7 +40,14 @@ register_activation_hook(__FILE__, 'mercury_activate');
 register_deactivation_hook(__FILE__, 'mercury_deactivate');
 register_uninstall_hook(__FILE__, 'mercury_uninstall');
 add_filter('woocommerce_payment_gateways', "add_cardano_mercury");
-add_action('init', 'setup_mercury_transaction_post_type');
+
+// add_action('init', 'setup_mercury_transaction_post_type');
+
+add_action('init', [
+        Transaction::class,
+        'init'
+]);
+
 add_action('init', [
         NativeAsset::class,
         'init',
@@ -49,6 +57,11 @@ add_action('mercury_sync_assets', [
         NativeAsset::class,
         'sync',
 ]);
+
+add_action('woocommerce_cart_calculate_fees', [
+        WC_Gateway_Cardano_Mercury::class,
+        'maybe_add_fees',
+], 20);
 
 define('mercury_url', plugin_dir_url(__FILE__));
 
@@ -60,6 +73,36 @@ const order_payment_table  = 'mercury_order_payments';
 const setup_log            = ['source' => 'mercury_setup'];
 const cron_log             = ['source' => 'mercury_cron'];
 const processing_log       = ['source' => 'mercury_processing'];
+
+//function cart_custom_fee($cart) {
+//    $log = wc_get_logger();
+//    $log->debug("Cart Custom Fee called!", processing_log);
+//
+//    $post_data = [];
+//    if (isset($_REQUEST['post_data'])) {
+//        parse_str($_REQUEST['post_data'], $post_data);
+//    }
+//
+//    $session = WC()->session;
+//
+//    if (!empty($post_data)) {
+////        $log->debug("POST Data:\r\n" . print_r($post_data, true), processing_log);
+//        $session->set('cardano_currency', $post_data['cardano_currency']);
+//    } else {
+////        $log->debug("Cart Data:\r\n" . print_r($cart, true), processing_log);
+////        $log->debug("Session Data:\r\n" . print_r($session, true), processing_log);
+//    }
+//
+//    $payment_method   = $post_data['payment_method'] ?? $session->get('chosen_payment_method');
+//    $cardano_currency = $post_data['cardano_currency'] ?? $session->get('cardano_currency');
+//
+//    $log->debug("Payment Method: {$payment_method}", processing_log);
+//    $log->debug("Cardano Currency: {$cardano_currency}", processing_log);
+//
+//    if ($payment_method === 'cardano_mercury') {
+//        $cart->add_fee("Mercury Processing Fee", 1);
+//    }
+//}
 
 function lovelace_to_ADA($lovelace) {
     return $lovelace / 1000000;
@@ -117,6 +160,8 @@ function scaffold_mercury() {
     // Set up the Mercury payment gateway
     class WC_Gateway_Cardano_Mercury extends WC_Payment_Gateway {
 
+        const gateway_id = "cardano_mercury";
+
         private $prices_table, $log;
         public $blockfrostAPIKey, $walletAddress, $currencyConverterAPI;
 
@@ -144,7 +189,7 @@ function scaffold_mercury() {
             ];
             $this->view_transaction_url = 'https://cardanoscan.io/transaction/%s';
             $this->prices_table         = $wpdb->prefix . price_table_name;
-            $this->id                   = "cardano_mercury";
+            $this->id                   = self::gateway_id;
             $this->icon                 = apply_filters("cardano_mercury_icon", "");
             $this->has_fields           = true;
             $this->method_title         = _x("Cardano Mercury", "Cardano Mercury payment method", "woocommerce");
@@ -171,6 +216,92 @@ function scaffold_mercury() {
                     $this,
                     'thankyou_page',
             ]);
+
+            add_action("woocommerce_cart_calculate_fees", [
+                    $this,
+                    'maybe_add_fees',
+            ]);
+//
+//            add_action("woocommerce_calculate_totals", [
+//                    $this,
+//                    'check_totals',
+//            ]);
+
+            add_action('woocommerce_after_checkout_form', [
+                    $this,
+                    'inject_checkout_scripts',
+            ]);
+        }
+
+        public function inject_checkout_scripts() {
+            wc_enqueue_js("
+                $('form.checkout').on('change', 'input[name^=\'payment_method\']', function() {
+                    $('body').trigger('update_checkout');
+                });
+                $('form.checkout').on('change','select[name^=\'cardano_currency\']', () => {
+                    $('body').trigger('update_checkout');
+                });
+            ");
+        }
+
+        public function check_totals($cart) {
+            $this->log->debug("Checking totals...\r\n" . print_r($cart, true), processing_log);
+        }
+
+        public static function maybe_add_fees($cart) {
+
+//            $log = wc_get_logger();
+
+            $options = get_option(self::options_key);
+
+            $post_data = [];
+            if (isset($_REQUEST['post_data'])) {
+                parse_str($_REQUEST['post_data'], $post_data);
+            }
+
+            $session = WC()->session;
+
+            if (!empty($post_data)) {
+                $session->set('cardano_currency', $post_data['cardano_currency']);
+            }
+
+            $chosen_gateway   = $post_data['payment_method'] ?? $session->get('chosen_payment_method');
+            $cardano_currency = $post_data['cardano_currency'] ?? $session->get('cardano_currency');
+
+            $order_subtotal = $cart->cart_contents_total + $cart->shipping_total;
+//            $log->debug("Order Subtotal: {$order_subtotal}");
+            // Add a 3% service charge
+
+            $fee_label    = $options['processFeeLabel'];
+            $flat_fee     = 0;
+            $variable_fee = 0;
+            $fee          = 0;
+
+            if ($options['processFeeFlat']) {
+                $flat_fee = $options['processFeeFlat'];
+            }
+
+            if ($options['processFeeVariable']) {
+                $variable_fee_rate = $options['processFeeVariable'];
+                $variable_fee      = $variable_fee_rate * $order_subtotal;
+            }
+
+            if ($flat_fee != 0 && $variable_fee != 0) {
+                $fee = max($flat_fee, $variable_fee);
+            } else if ($flat_fee != 0) {
+                $fee = $flat_fee;
+            } else if ($variable_fee != 0) {
+                $fee = $variable_fee;
+            }
+//            $fee      = $fee_rate * $order_subtotal;
+//            $pretty_fee = round($fee_rate * 100);
+
+//            $log->debug("Chosen Gateway: {$chosen_gateway}\r\nCardano Currency: {$cardano_currency}", processing_log);
+            if ($fee !== 0 && $chosen_gateway === self::gateway_id) {
+                $cart->add_fee($fee_label, $fee);
+            } else {
+//                $cart->remove_fee($fee_label);
+            }
         }
 
         public function get_options() {
@@ -206,11 +337,23 @@ function scaffold_mercury() {
         }
 
         public function payment_fields() {
-            $cart_data  = WC()->cart;
+            parent::payment_fields();
+            $cart_data = WC()->cart;
+
             $cart_total = $cart_data->get_totals()['total'];
             $curr       = get_woocommerce_currency();
 
             $ADAPrice = Pricefeeder::getAveragePrice()['price'];
+
+            $post_data = [];
+            if (isset($_REQUEST['post_data'])) {
+                parse_str($_REQUEST['post_data'], $post_data);
+            }
+
+            $selected_currency = $post_data['cardano_currency'] ?? WC()->session->get('cardano_currency');
+
+            $ada_total = 0;
+            $usd_total = 0;
 
             switch ($curr) {
                 case 'ADA':
@@ -259,10 +402,12 @@ function scaffold_mercury() {
                     $ada_offset = (1168010 + ((strlen($token->post_title) - 56) * 4310)) / 1000000;
 
                     $currencies[] = [
-                            'name'     => '$' . get_post_meta($token->ID, 'ticker', true),
-                            'unit'     => $token->post_title,
-                            'decimals' => (int)get_post_meta($token->ID, 'decimals', true),
-                            'price'    => ($ada_total - $ada_offset) / (float)$currency_price,
+                            'name'        => '$' . get_post_meta($token->ID, 'ticker', true),
+                            'unit'        => $token->post_title,
+                            'decimals'    => (int)get_post_meta($token->ID, 'decimals', true),
+                            'minUTxO'     => $ada_offset,
+                            'perAdaPrice' => (float)$currency_price,
+                            'price'       => ($ada_total - $ada_offset) / (float)$currency_price,
                     ];
                 }
 
@@ -275,12 +420,17 @@ function scaffold_mercury() {
                             </label>
                             <select name="cardano_currency" id="cardano_currency">
                                 <?php
+                                $chosen_currency = null;
                                 foreach ($currencies as $token) {
-                                    $selected = ($token['unit'] === "ada");
+
+                                    $selected = ($token['unit'] === $selected_currency);
+                                    if ($selected) {
+                                        $chosen_currency = $token;
+                                    }
                                     ?>
                                     <option value="<?= $token['unit']; ?>"
-                                            <?= ($selected ? 'selected="selected"' : ''); ?>><?= $token['name'] . ' (' . round($token['price'],
-                                                $token['decimals']) . ')'; ?>
+                                            <?= $selected ? 'selected="selected"' : ''; ?>>
+                                        <?= $token['name'] . ' (' . round($token['price'], $token['decimals']) . ')'; ?>
                                     </option>
                                     <?php
                                 }
@@ -292,24 +442,25 @@ function scaffold_mercury() {
                             reflects a minimum amount of ADA (minUTxO) required to accompany the native asset of your
                             choosing.
                         </p>
-                        <!--                        <p class="form-row form-row-wide">-->
-                        <!--                            Total Price: --><?php
-                        //= $cart_total; ?><!-- --><?php
-                        //= $curr; ?>
-                        <!--                            <br/>-->
-                        <!--                            Conversion Rate: --><?php
-                        //= $exchange_rate; ?><!-- USD : 1 --><?php
-                        //= $curr; ?>
-                        <!--                            <br/>-->
-                        <!--                            USD Total Price: --><?php
-                        //= $usd_total; ?><!-- USD-->
-                        <!--                            <br/>-->
-                        <!--                            ADA Price: --><?php
-                        //= $ADAPrice; ?><!-- USD-->
-                        <!--                            <br/>-->
-                        <!--                            ADA Total Price: --><?php
-                        //= round($ada_total, 6); ?><!-- &#8371;-->
-                        <!--                        </p>-->
+                        <p class="form-row form-row-wide">
+                            Total Price: <?= $cart_total; ?> <?= $curr; ?>
+                            <br/>
+                            Conversion Rate: <?= $exchange_rate; ?> USD : 1 <?= $curr; ?>
+                            <br/>
+                            USD Total Price: <?= $usd_total; ?> USD
+                            <br/>
+                            ADA Price: <?= $ADAPrice; ?> USD
+                            <br/>
+                            ADA Total Price: <?= round($ada_total, 6); ?> &#8371;
+                            <?php
+                            if ($chosen_currency && $chosen_currency['unit'] !== 'ada'): ?>
+                                <br/>Paying with: <?= $chosen_currency['name']; ?>
+                                <br/>minUTxO: <?= $chosen_currency['minUTxO']; ?> &#8371;
+                                <br/><?= $chosen_currency['name']; ?> ADA Price: <?= $chosen_currency['perAdaPrice']; ?> &#8371;
+                                <br/>Order <?= $chosen_currency['name']; ?>  Price: <?= round($chosen_currency['price'],
+                                        $chosen_currency['decimals']); ?><?php
+                            endif; ?>
+                        </p>
                     </div>
                     <?php
                 }
@@ -322,7 +473,7 @@ function scaffold_mercury() {
 
         public function validate_fields() {
             $log = wc_get_logger();
-            $log->debug("Validating Form Fields!\r\n" . print_r($_POST, true), processing_log);
+//            $log->debug("Validating Form Fields!\r\n" . print_r($_POST, true), processing_log);
             if ($_POST['payment_method'] === 'cardano_mercury') {
                 switch ($_POST['cardano_currency']) {
                     case 'ada':
@@ -397,16 +548,16 @@ function scaffold_mercury() {
                     break;
             }
 
+            if ($usdTotal) {
+                $ADATotal = $usdTotal / $ADAPrice;
+            }
+
             if (!$ADATotal) {
                 wc_add_notice("Sorry, we're having technical difficulties fetching current ADA price. Please try again later.");
                 $order->update_status('wc-failed', "ADA Total Price is 0");
                 $log->error("ADA Price is 0?! {$ADATotal} {$usdTotal}", processing_log);
 
                 return null;
-            }
-
-            if ($usdTotal) {
-                $ADATotal = $usdTotal / $ADAPrice;
             }
 
             $ADATotal = round($ADATotal, 6);
@@ -421,29 +572,46 @@ function scaffold_mercury() {
                 $token = NativeAsset::getToken($cardano_currency);
                 $log->debug("Found token?\r\n" . print_r($token, true), processing_log);
                 if (!$token || (float)$token->price <= 0) {
+                    $this->log->debug("Could not find a token?!", processing_log);
                     wc_add_notice("Could not locate the Native Asset you selected for payment. Sorry. Please try again.");
                 }
-
-                // TODO: Record ADA + Native Asset price here...
 
                 $ada_offset  = (1168010 + ((strlen($token->post_title) - 56) * 4310)) / 1000000;
                 $token_price = ($ADATotal - $ada_offset) / (float)$token->price;
 
+                $order->update_meta_data('Pay_With_Token', $token->unit);
                 $order->update_meta_data('ADA_minUTxO', $ada_offset);
+                $order->update_meta_data('Token_Price', $token->price);
+                $order->update_meta_data('Token_Decimals', $token->decimals);
+                $order->update_meta_data('Token_Display_Price', $token_price);
 
-                // TODO: Need to update the prices table to have fields for native asset policy_id, asset_id, and quantity
+                $token_quantity = round($token_price, $token->decimals) * pow(10, $token->decimals);
 
-//                $currencies[] = [
-//                        'name'     => '$' . get_post_meta($token->ID, 'ticker', true),
-//                        'unit'     => $token->post_title,
-//                        'decimals' => (int)get_post_meta($token->ID, 'decimals', true),
-//                        'price'    => ($ada_total - $ada_offset) / (float)$currency_price,
-//                ];
+                $order->update_meta_data('Base_Token_Quantity', $token_quantity);
 
-//                while (!$recorded) {
-//                    $recorded = $this->recordPrice($order_id, $lovelace_value, $ADAPrice);
-//                }
+                $min_utxo_lovelace = $ada_offset * 1000000;
+
+                // 279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f534e454b
+
+                while (!$recorded) {
+                    $this->log->debug("Trying to record price? {$token_quantity}", processing_log);
+                    $recorded = $this->recordPrice($order_id, $min_utxo_lovelace, $ADAPrice, $token->unit,
+                            $token_quantity, $token->price);
+                    if (!$recorded) {
+                        $token_quantity++;
+                    }
+                }
+
+                $ADATotal = $min_utxo_lovelace / 1000000;
+                $order->update_meta_data('lovelace_total', $ada_offset);
+                $order->update_meta_data('token_total', $token_quantity);
+                $TokenTotal = $token_quantity / pow(10, $token->decimals);
+                $order_note = sprintf("Awaiting payment of %s ADA + %s %s to address %s.", $ADATotal, $TokenTotal,
+                        $token->ticker, $this->walletAddress);
+                WC()->session->set("ADA_total", $ADATotal);
+                WC()->session->set("Token_total", $TokenTotal);
             } else {
+
                 while (!$recorded) {
                     $recorded = $this->recordPrice($order_id, $lovelace_value, $ADAPrice);
                     if (!$recorded) {
@@ -457,12 +625,13 @@ function scaffold_mercury() {
 
                 $order_note = sprintf("Awaiting payment of %s ADA to address %s.", $ADATotal, $this->walletAddress);
                 WC()->session->set("ADA_total", $ADATotal);
-                add_action('woocommerce_email_order_details', [
-                        $this,
-                        'email_details',
-                ], 10, 4);
-                $order->update_status('wc-on-hold', $order_note);
             }
+
+            add_action('woocommerce_email_order_details', [
+                    $this,
+                    'email_details',
+            ], 10, 4);
+            $order->update_status('wc-on-hold', $order_note);
 
             if ($curr === 'ADA') {
                 $order->set_total($ADATotal);
@@ -536,22 +705,34 @@ function scaffold_mercury() {
             include dirname(__FILE__) . '/views/email.php';
         }
 
-        private function recordPrice($order_id, $lovelace_value, $conversion_rate): int {
+        private function recordPrice($order_id, $lovelace_value, $conversion_rate, $token_id = null,
+                                     $token_quantity = 0, $token_price = 0): int {
             global $wpdb;
 
-            $wpdb->insert($this->prices_table, [
-                    'order_id'        => $order_id,
-                    'lovelace_value'  => $lovelace_value,
-                    'conversion_rate' => $conversion_rate,
-            ]);
+            $wpdb->insert($this->prices_table,
+                    compact('order_id', 'lovelace_value', 'conversion_rate', 'token_id', 'token_quantity',
+                            'token_price'));
+
+            $this->log->debug("Attempted to record price?\r\n{$wpdb->last_query}\r\n{$wpdb->last_error}",
+                    processing_log);
 
             return $wpdb->insert_id;
+        }
+
+        private function getPaymentDetails($order_id) {
+            global $wpdb;
+            $order_value_table = $wpdb->prefix . price_table_name;
+
+            return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$order_value_table} WHERE order_id = %d", $order_id));
         }
 
         public function thankyou_page($order_id) {
             $mercury_settings = $this->get_options();
             $Order            = wc_get_order($order_id);
-            $ADATotal         = $Order->get_meta('ADA_total');
+            $PaymentDetails   = $this->getPaymentDetails($Order->get_id());
+            if ($PaymentDetails->token_id) {
+                $Token = NativeAsset::getToken($PaymentDetails->token_id);
+            }
 
             include dirname(__FILE__) . '/views/thank-you.php';
         }
@@ -703,6 +884,34 @@ function scaffold_mercury() {
                                     '86400' => '24 Hours',
                             ],
                     ],
+                    'processFeeFlat'          => [
+                            'title'       => __('Flat Rate Processing Fee', 'woocommerce'),
+                            'type'        => 'number',
+                            'description' => __('This is a flat rate number that will be added to (or subtracted from, if negative) the order total when selecting Mercury as the payment method. Leave blank or zero for none. The value provided will be added to the order in the store selected currency',
+                                    'woocommerce'),
+                            'default'     => 0,
+                            'placeholder' => 1,
+                    ],
+                    'processFeeVariable'      => [
+                            'title'             => __('Variable Rate Processing Fee', 'woocommerce'),
+                            'type'              => 'number',
+                            'description'       => __('This is a variable (percentage-based) rate that will be added to (or subtracted from, if negative) the order total when selecting Mercury as the payment method. Leave blank or zero for none. Example: A value of 0.03 will apply a 3% fee based on the order items and shipping subtotal.',
+                                    'woocommerce'),
+                            'default'           => 0,
+                            'custom_attributes' => [
+                                    'min'  => -1.0,
+                                    'max'  => 1.0,
+                                    'step' => 'any',
+                            ],
+                            'placeholder'       => 0.03,
+                    ],
+                    'processFeeLabel'         => [
+                            'title'       => __('Processing Fee Label', 'woocommerce'),
+                            'type'        => 'string',
+                            'default'     => 'Processing Fee',
+                            'description' => __('The label for the processing fee that will be shown to the user on cart and checkout pages.',
+                                    'woocommerce'),
+                    ],
             ];
         }
 
@@ -776,14 +985,22 @@ function setup_mercury_tables() {
     $order_value_table   = $wpdb->prefix . price_table_name;
     $order_payment_table = $wpdb->prefix . order_payment_table;
 
+    // 084154ee75830cf626e07cb548d562598936dd3a6ee494f7cda6c528
+
+    // ALTER TABLE `wp_mercury_order_values` DROP INDEX `lovelace_value`
     $sql = "
+    ALTER TABLE {$order_value_table} DROP INDEX `lovelace_value`;
     CREATE TABLE {$order_value_table} (
         `order_id` int(11) unsigned not null auto_increment,
         `lovelace_value` bigint unsigned not null,
         `conversion_rate` decimal(18,6) not null,
-        primary key (`order_id`),
-        unique key (`lovelace_value`)
-    ) {$charset_collage};";
+        `token_id` varchar(120),
+        `token_quantity` bigint not null default 0,
+        `token_price` decimal(38,19) not null default 0,
+        primary key (`order_id`)
+    ) {$charset_collage};
+    ALTER TABLE {$order_value_table} ADD UNIQUE uk_lovelace_token_quantity (`lovelace_value`, `token_id`, `token_quantity`);
+";
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);

@@ -167,7 +167,7 @@ eof, mercury_text_domain));
 
         if (class_exists('TaskManager')) {
             TaskManager::maybeSchedule('mercury_sync_assets', $cron_frequency);
-            TaskManager::maybeSchedule('mercury_asset_details', 300);
+            TaskManager::maybeSchedule('mercury_asset_details', 86400);
         }
 
     }
@@ -193,6 +193,10 @@ eof, mercury_text_domain));
         }
 
         return $token;
+    }
+
+    public static function formatQuantity($amount, $Token) {
+        return round($amount / pow(10, $Token->decimals), $Token->decimals);
     }
 
     public static function fetch_asset_details() {
