@@ -76,7 +76,7 @@ function format_currency($value, $decimals = 0) {
                                 6); ?></span>
                                 </span>
                 <?php
-                if ($Token): ?>
+                if (isset($Token)): ?>
                     <br/>plus<span class="woocommerce-Price-asset-amount amount">
                     <span class="no-copy">$<?= $Token->ticker; ?></span>
                         <span class="all-copy" id="NA-total"><?= format_currency($PaymentDetails->token_quantity,
@@ -241,7 +241,13 @@ data;
             const lovelace_value = BigInt($('#ADA-total').html() * 1000000);
 
             const native_asset_unit = $('#NA-unit').html();
-            const native_asset_quantity = BigInt($('#NA-quantity').html());
+            const na_qty = $('#NA-quantity').html();
+
+            let native_asset_quantity;
+
+            if (na_qty) {
+                native_asset_quantity = BigInt($('#NA-quantity').html());
+            }
 
             let assets = {
                 lovelace: lovelace_value
