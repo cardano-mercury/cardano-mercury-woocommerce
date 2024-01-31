@@ -13,8 +13,10 @@ if (!defined('ABSPATH')) {
  * @var WP_Post                    $Token
  */
 
-function format_currency($value, $decimals = 0) {
-    return number_format(($value / pow(10, $decimals)), $decimals, '.', '');
+if (!function_exists('format_currency')) {
+    function format_currency($value, $decimals = 0) {
+        return number_format(($value / pow(10, $decimals)), $decimals, '.', '');
+    }
 }
 
 ?>
@@ -61,23 +63,25 @@ function format_currency($value, $decimals = 0) {
 <div id="cardanoPaymentDetails">
     <h2><?= apply_filters('mercury_payment_details_heading', 'Cardano Payment Details'); ?></h2>
     <ul class="woocommerce-order-overview woocommerce-thankyou-order-details order_details">
-        <li class="woocommerce-order-overview__wallet-address">
-            <p style="word-wrap: break-word;">Wallet Address (click address to copy): <span class="all-copy"
-                                                                                            id="wallet-address"><?= $this->walletAddress; ?></span>
-            </p>
-        </li>
-        <li class="woocommerce-order-overview__amount">
-            <p style="word-wrap: break-word;">
-                Total (click amount to copy):
-                <br/>
-                <span class="woocommerce-Price-ada-amount amount">
+        <?php
+        if ($Order->has_status('on-hold')): ?>
+            <li class="woocommerce-order-overview__wallet-address">
+                <p style="word-wrap: break-word;">Wallet Address (click address to copy): <span class="all-copy"
+                                                                                                id="wallet-address"><?= $this->walletAddress; ?></span>
+                </p>
+            </li>
+            <li class="woocommerce-order-overview__amount">
+                <p style="word-wrap: break-word;">
+                    Total (click amount to copy):
+                    <br/>
+                    <span class="woocommerce-Price-ada-amount amount">
                                     <span class="no-copy">₳</span>
                     <span class="all-copy" id="ADA-total"><?= format_currency($PaymentDetails->lovelace_value,
                                 6); ?></span>
                                 </span>
-                <?php
-                if (isset($Token)): ?>
-                    <br/>plus<span class="woocommerce-Price-asset-amount amount">
+                    <?php
+                    if (isset($Token)): ?>
+                        <br/>plus<span class="woocommerce-Price-asset-amount amount">
                     <span class="no-copy">$<?= $Token->ticker; ?></span>
                         <span class="all-copy" id="NA-total"><?= format_currency($PaymentDetails->token_quantity,
                                     $Token->decimals); ?></span>
@@ -87,18 +91,16 @@ function format_currency($value, $decimals = 0) {
                            id="NA-unit"><?= $Token->unit; ?></a>
                         <span style="display: none" id="NA-quantity"><?= $PaymentDetails->token_quantity; ?></span>
                 </span>
-                <?php
-                endif; ?>
-            </p>
-        </li>
-        <li class="woocommerce-order-overview__timeout">
-            <p>
-                You have <?= $this->seconds_to_time($this->orderTimeout); ?> from the time your order was submitted to
-                complete your payment. Otherwise, your order will be cancelled.
-            </p>
-        </li>
-        <?php
-        if ($Order->has_status('on-hold')): ?>
+                    <?php
+                    endif; ?>
+                </p>
+            </li>
+            <li class="woocommerce-order-overview__timeout">
+                <p>
+                    You have <?= $this->seconds_to_time($this->orderTimeout); ?> from the time your order was submitted
+                    to complete your payment. Otherwise, your order will be cancelled.
+                </p>
+            </li>
             <li class="woocommerce-order-overview__wallets" id="walletHolder">
                 Searching for Cardano light wallets...
             </li>

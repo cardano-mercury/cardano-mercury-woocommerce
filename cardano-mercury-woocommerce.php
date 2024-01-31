@@ -45,7 +45,7 @@ add_filter('woocommerce_payment_gateways', "add_cardano_mercury");
 
 add_action('init', [
         Transaction::class,
-        'init'
+        'init',
 ]);
 
 add_action('init', [
@@ -288,9 +288,9 @@ function scaffold_mercury() {
 
             if ($flat_fee != 0 && $variable_fee != 0) {
                 $fee = max($flat_fee, $variable_fee);
-            } else if ($flat_fee != 0) {
+            } elseif ($flat_fee != 0) {
                 $fee = $flat_fee;
-            } else if ($variable_fee != 0) {
+            } elseif ($variable_fee != 0) {
                 $fee = $variable_fee;
             }
 //            $fee      = $fee_rate * $order_subtotal;
@@ -442,7 +442,7 @@ function scaffold_mercury() {
                             reflects a minimum amount of ADA (minUTxO) required to accompany the native asset of your
                             choosing.
                         </p>
-                        <p class="form-row form-row-wide">
+                        <p class="form-row form-row-wide" style="display: none">
                             Total Price: <?= $cart_total; ?> <?= $curr; ?>
                             <br/>
                             Conversion Rate: <?= $exchange_rate; ?> USD : 1 <?= $curr; ?>
@@ -472,7 +472,7 @@ function scaffold_mercury() {
         }
 
         public function validate_fields() {
-            $log = wc_get_logger();
+//            $log = wc_get_logger();
 //            $log->debug("Validating Form Fields!\r\n" . print_r($_POST, true), processing_log);
             if ($_POST['payment_method'] === 'cardano_mercury') {
                 switch ($_POST['cardano_currency']) {
@@ -630,7 +630,7 @@ function scaffold_mercury() {
             add_action('woocommerce_email_order_details', [
                     $this,
                     'email_details',
-            ], 10, 4);
+            ], 10, 1);
             $order->update_status('wc-on-hold', $order_note);
 
             if ($curr === 'ADA') {
@@ -700,7 +700,10 @@ function scaffold_mercury() {
         public function email_details($order_id) {
             $mercury_settings = $this->get_options();
             $order            = wc_get_order($order_id);
-            $ADATotal         = $order->get_meta('ADA_total');
+            $PaymentDetails   = $this->getPaymentDetails($order_id);
+            if ($PaymentDetails->token_id) {
+                $Token = NativeAsset::getToken($PaymentDetails->token_id);
+            }
 
             include dirname(__FILE__) . '/views/email.php';
         }
@@ -1011,6 +1014,9 @@ function setup_mercury_tables() {
  */
 function mercury_deactivate() {
     as_unschedule_all_actions('mercury_cron_hook');
+    as_unschedule_all_actions('mercury_wallet_sync');
+    as_unschedule_all_actions('mercury_sync_assets');
+    as_unschedule_all_actions('mercury_asset_details');
 }
 
 /**
@@ -1018,6 +1024,8 @@ function mercury_deactivate() {
  */
 function mercury_uninstall() {
     as_unschedule_all_actions('mercury_cron_hook');
+    as_unschedule_all_actions('mercury_wallet_sync');
+    as_unschedule_all_actions('mercury_sync_assets');
 }
 
 /**
