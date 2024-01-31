@@ -9,6 +9,7 @@ class Pricefeeder {
 
     const hitbtc_url = 'https://api.hitbtc.com/api/2/public/ticker/ADAUSD';
     const coingecko_url = 'https://api.coingecko.com/api/v3/simple/price?ids=cardano&vs_currencies=usd';
+
 //    const bittrex_url = 'https://api.bittrex.com/v3/markets/ADA-USD/ticker';
 
     private static function getPrice($url) {
@@ -24,24 +25,35 @@ class Pricefeeder {
     }
 
     private static function getHitBTCPrice() {
-        try {
-            $data = self::getPrice(self::hitbtc_url);
-        } catch (GuzzleException $e) {
-            throw $e;
+        $price = get_transient("Mercury_HitBTC_ADA_USD_Price");
+        if (!$price) {
+            try {
+                $data  = self::getPrice(self::hitbtc_url);
+                $price = $data->last;
+                set_transient("Mercury_HitBTC_ADA_USD_Price", $price, 60);
+            } catch (GuzzleException $e) {
+                throw $e;
+            }
         }
 
-        return $data->last;
+        return $price;
 
     }
 
     private static function getCoinGeckoPrice() {
-        try {
-            $data = self::getPrice(self::coingecko_url);
-        } catch (GuzzleException $e) {
-            throw $e;
+        $price = get_transient("Mercury_CoinGecko_ADA_USD_Price");
+
+        if (!$price) {
+            try {
+                $data  = self::getPrice(self::coingecko_url);
+                $price = $data->cardano->usd;
+                set_transient("Mercury_CoinGecko_ADA_USD_Price", $price, 60);
+            } catch (GuzzleException $e) {
+                throw $e;
+            }
         }
 
-        return $data->cardano->usd;
+        return $price;
     }
 
 //    private static function getBittrexPrice() {
@@ -75,10 +87,10 @@ class Pricefeeder {
 //        }
 
         $prices = array_filter([
-                                   $hitbtc,
-                                   $coingecko,
-//                                   $bittrex,
-                               ]);
+            $hitbtc,
+            $coingecko,
+            //                                   $bittrex,
+        ]);
 
         $avg_price = round(array_sum($prices) / count($prices), 6);
 
@@ -86,7 +98,7 @@ class Pricefeeder {
             'price'     => $avg_price,
             'hitbtc'    => $hitbtc,
             'coingecko' => $coingecko,
-//            'bittrex'   => $bittrex,
+            //            'bittrex'   => $bittrex,
         ];
 
     }

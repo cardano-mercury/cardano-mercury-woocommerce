@@ -17,19 +17,29 @@ class Blockfrost {
         "ipfs"    => "https://ipfs.blockfrost.io/api/v0/",
     ];
 
+    public static function new(): self {
+        $options = get_option('woocommerce_cardano_mercury_settings');
+        $mode    = $options['blockfrostMode'];
+        $key     = $options['blockfrostAPIKey'];
+
+        return new self($mode, $key);
+    }
+
     /**
      * Blockfrost constructor.
      *
      * @param string $mode "testnet" or "mainnet"
      * @param string $key  The project API key
      */
-    public function __construct($mode, $key = '') {
+    public function __construct(string $mode, string $key = '') {
         $this->client = new Client([
-                                       "base_uri" => self::endpoint[$mode],
-                                       "headers"  => [
-                                           "project_id" => $key,
-                                       ],
-                                   ]);
+            "base_uri" => self::endpoint[$mode],
+            "headers"  => [
+                "project_id" => $key,
+            ],
+        ]);
+
+        return $this;
     }
 
     /**
@@ -60,13 +70,18 @@ class Blockfrost {
         return $result->data->is_healthy;
     }
 
-    public function getTransactions($address, $page = 1, $order = 'desc') {
+    public function getTransactions($address, $page = 1, $order = 'desc'): object {
         return $this->get("addresses/{$address}/transactions", [
-            'query' => [
-                'page'  => $page,
-                'order' => $order,
-            ],
+            'query' => compact('page', 'order'),
         ]);
+    }
+
+    public function getTransactionUTxO($hash): object {
+        return $this->get("txs/{$hash}/utxos");
+    }
+
+    public function getTransactionMetadata($hash):object {
+        return $this->get("txs/{$hash}/metadata");
     }
 
     public function getAddressUTXO($address, $page = 1) {

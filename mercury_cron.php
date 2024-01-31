@@ -4,6 +4,9 @@
  */
 
 use Mercury\Blockfrost;
+use Mercury\NativeAsset;
+use Mercury\PaymentData;
+use Mercury\Transaction;
 
 if (!defined('ABSPATH')) {
     die();
@@ -38,6 +41,28 @@ class TaskManager {
             $this,
             'sync_wallet',
         ]);
+    }
+
+    public static function maybeSchedule($task, $frequency) {
+        $next_hook = as_has_scheduled_action($task, [], 'cardano-mercury');
+        if ($next_hook) {
+            return;
+        } else {
+            as_schedule_recurring_action(time(), $frequency, $task, [], 'cardano-mercury');
+        }
+    }
+
+    public static function scheduleOnce($task, $args) {
+        as_schedule_single_action(time(), $task, $args, 'cardano-mercury');
+    }
+
+    public static function reschedule($task, $frequency) {
+        $next_hook = as_has_scheduled_action($task, [], 'cardano-mercury');
+        if ($next_hook) {
+            as_unschedule_all_actions($task, [], 'cardano-mercury');
+        }
+        as_schedule_recurring_action(time(), $frequency, $task, [], 'cardano-mercury');
+
     }
 
     public function Blockfrost() {
@@ -122,11 +147,11 @@ class TaskManager {
         $this->write("Looking for addresses to gather transactions for.", self::LOG_DEBUG);
 
         $pending_orders = get_posts([
-                                        'post_type'   => 'shop_order',
-                                        'post_status' => 'wc-on-hold',
-                                        'meta_key'    => '_payment_method',
-                                        'meta_value'  => 'cardano_mercury',
-                                    ]);
+            'post_type'   => 'shop_order',
+            'post_status' => 'wc-on-hold',
+            'meta_key'    => '_payment_method',
+            'meta_value'  => 'cardano_mercury',
+        ]);
 
         $addresses_to_check = [
             $this->defaultAddress,
@@ -140,23 +165,19 @@ class TaskManager {
         $addresses_to_check = array_unique($addresses_to_check);
 
         $this->write("Found " . count($addresses_to_check) . " addresses to check for transactions...",
-                     self::LOG_DEBUG);
+            self::LOG_DEBUG);
 
         foreach ($addresses_to_check as $address) {
             $page = 1;
 
-            while ($transactions = $BF->get("addresses/{$address}/transactions", [
-                'query' => [
-                    'page'  => $page,
-                    'order' => 'desc',
-                ],
-            ])) {
+            while ($transactions = $BF->getTransactions($address, $page)) {
                 if (!count($transactions->data)) {
                     $this->write("No transaction data found?\r\n" . wc_print_r($transactions, true), self::LOG_INFO);
                     break;
                 }
                 foreach ($transactions->data as $transaction) {
-                    $processed = $this->processTransaction($transaction, $address);
+                    $processed = Transaction::process($transaction, $address);
+//                    $processed = $this->processTransaction($transaction, $address);
                     if (!$processed) {
                         break 2;
                     }
@@ -176,15 +197,17 @@ class TaskManager {
         }
 
         foreach ($pending_orders as $order) {
-            $ada_total      = get_post_meta($order->ID, 'ADA_total', true);
+            $PaymentData = PaymentData::getByOrderId($order->ID);
+
             $wallet_address = get_post_meta($order->ID, 'wallet_address', true);
+            $Order          = wc_get_order($order->ID);
 
             $payments_args = [
-                'post_type'  => 'mercury-transaction',
+                'post_type'  => Transaction::POST_TYPE,
                 'meta_query' => [
                     [
                         'key'   => 'ada_value',
-                        'value' => $ada_total,
+                        'value' => $PaymentData->adaValue(),
                     ],
                     [
                         'key'   => 'payment_address',
@@ -201,68 +224,96 @@ class TaskManager {
             ];
 
             $matching_payments = get_posts($payments_args);
-            if (count($matching_payments) === 1) {
-                $payment = $matching_payments[0];
-                $in_use  = $wpdb->get_var($wpdb->prepare("
-                SELECT post_id 
-                FROM {$wpdb->postmeta} 
-                WHERE meta_key = 'tx_hash' 
-                  AND meta_value = %s", $payment->post_title));
+
+            foreach ($matching_payments as $payment) {
+                $orderNote     = self::make_order_note($PaymentData, $payment);
+                $input_address = implode(' | ', get_post_meta($payment->ID, 'received_from', true));
+//                $this->write("input address: {$input_address}");
+
+                $in_use = $wpdb->get_var($wpdb->prepare("
+                    SELECT post_id 
+                    FROM {$wpdb->postmeta} 
+                    WHERE meta_key = 'tx_hash' 
+                      AND meta_value = %s", $payment->post_title));
                 if ($in_use) {
-                    $this->write("The specified transaction hash is already in use by Order #{$in_use}",
-                                 self::LOG_INFO);
+//                    $this->write("The specified transaction hash is already in use by Order #{$in_use}",
+//                        self::LOG_INFO);
                     continue;
                 }
 
-                $Order = wc_get_order($order->ID);
+                if ($PaymentData->token_id) {
+                    // If there is a token id, we need to make sure the token was sent!
+                    $output = json_decode(get_post_meta($payment->ID, 'txn_output', true));
+
+                    if ($output->{$PaymentData->token_id} == $PaymentData->token_quantity) {
+                        $Order->payment_complete($payment->post_title);
+                        $Order->update_meta_data('tx_hash', $payment->post_title);
+                        $Order->add_order_note($orderNote);
+                        $Order->update_meta_data('input_address', $input_address);
+                        $Order->save();
+                    }
+                    continue;
+                }
+
                 $Order->payment_complete($payment->post_title);
                 $Order->update_meta_data('tx_hash', $payment->post_title);
-                $orderNote = sprintf("Order payment of %s verified at %s. Transaction ID: %s", $ada_total . " ADA",
-                                     $payment->post_date_gmt, $payment->post_title);
                 $Order->add_order_note($orderNote);
-                $Order->update_meta_data('input_address', get_post_meta($payment->ID, 'received_from', true));
-                continue;
+                $Order->update_meta_data('input_address', $input_address);
+                $Order->save();
             }
-
-            $this->write("Found " . count($matching_payments) . " matching transactions...", self::LOG_DEBUG);
-            $this->write(wc_print_r($matching_payments, true), self::LOG_DEBUG);
+//            }
         }
 
-        if ($this->orderTimeout) {
-            $expired = get_posts([
-                                     'post_type'   => 'shop_order',
-                                     'post_status' => 'wc-on-hold',
-                                     'meta_key'    => '_payment_method',
-                                     'meta_value'  => 'cardano_mercury',
-                                     'date_query'  => [
-                                         'before' => '-' . self::seconds_to_time($this->orderTimeout),
-                                     ],
-                                     'nopaging'    => true,
-                                     'order'       => 'ASC',
-                                 ]);
+        // TODO: Uncomment this out once we get native asset payment identification fixed
+        /*        if ($this->orderTimeout) {
+                    $expired = get_posts([
+                        'post_type'   => 'shop_order',
+                        'post_status' => 'wc-on-hold',
+                        'meta_key'    => '_payment_method',
+                        'meta_value'  => 'cardano_mercury',
+                        'date_query'  => [
+                            'before' => '-' . self::seconds_to_time($this->orderTimeout),
+                        ],
+                        'nopaging'    => true,
+                        'order'       => 'ASC',
+                    ]);
 
-            if (!empty($expired)) {
-                $this->write("EXPIRED ORDERS");
-                $this->write(wc_print_r($expired, true), self::LOG_DEBUG);
-                foreach ($expired as $order) {
-                    $Order       = wc_get_order($order->ID);
-                    $order_notes = <<<note
-Your order was <strong>cancelled</strong> due to not receiving payment in the allotted time. 
-Please do not send any funds to the payment address. 
-If you would like to complete your order please visit our website and try again.
-note;
-                    $Order->update_status('wc-cancelled');
-                    $Order->add_order_note($order_notes, true);
-                    $this->write("Order #{$order->ID} cancelled due to non-payment before the timeout.");
-                }
-            }
+                    if (!empty($expired)) {
+                        $this->write("EXPIRED ORDERS");
+                        $this->write(wc_print_r($expired, true), self::LOG_DEBUG);
+                        foreach ($expired as $order) {
+                            $Order       = wc_get_order($order->ID);
+                            $order_notes = <<<note
+        Your order was <strong>cancelled</strong> due to not receiving payment in the allotted time.
+        Please do not send any funds to the payment address.
+        If you would like to complete your order please visit our website and try again.
+        note;
+                            $Order->update_status('wc-cancelled');
+                            $Order->add_order_note($order_notes, true);
+                            $this->write("Order #{$order->ID} cancelled due to non-payment before the timeout.");
+                        }
+                    }
+                }*/
+
+    }
+
+    public static function make_order_note($PaymentData, $payment) {
+        if ($PaymentData->token_id) {
+            $Token = NativeAsset::getToken($PaymentData->token_id);
+            $note  = sprintf("Order payment of %s ADA + %s %s verified at %s. Transaction ID: %s",
+                $PaymentData->adaValue(), NativeAsset::formatQuantity($PaymentData->token_quantity, $Token),
+                $Token->ticker, $payment->post_date_gmt, $payment->post_title);
+        } else {
+            $note = sprintf("Order payment of %s ADA verified at %s. Transaction ID: %s", $PaymentData->adaValue(),
+                $payment->post_date_gmt, $payment->post_title);
         }
 
+        return $note;
     }
 
     public function sync_wallet($address) {
 
-        $this->write("Attempting to Sync Wallet. Wallet to check: {$address}");
+//        $this->write("Attempting to Sync Wallet. Wallet to check: {$address}");
         try {
             $BF = $this->Blockfrost();
         } catch (Exception $e) {
@@ -291,23 +342,25 @@ note;
             $this->write("Wallet sync processing page #{$page} of transaction information...");
 
             foreach ($transactions->data as $transaction) {
-                $inserted = $this->processTransaction($transaction, $address);
+                $inserted = Transaction::process($transaction,
+                    $address); // $this->processTransaction($transaction, $address);
+//                $inserted = $this->processTransaction($transaction, $address);
 
                 $total_processed += $inserted;
                 $total_skipped   += ($inserted - 1) * -1;
             }
 
             if (count($transactions->data) < 100) {
-                $this->write("Transaction count less than 100, should be the end of processing...", self::LOG_DEBUG);
+//                $this->write("Transaction count less than 100, should be the end of processing...", self::LOG_DEBUG);
                 break;
             }
             $page++;
         }
         $this->write("Done syncing wallet orders after {$page} pages of results. Processed: {$total_processed} Skipped: {$total_skipped}",
-                     self::LOG_DEBUG);
+            self::LOG_DEBUG);
     }
 
-    public function transactionExists($tx_hash) {
+    /*public function transactionExists($tx_hash) {
         return post_exists($tx_hash, '', '', 'mercury-transaction');
     }
 
@@ -340,7 +393,7 @@ note;
 
         if ($txn_details['lovelace'] === 0) {
             $this->write("We received no funds from this transaction, probably sending funds out. Skip it!",
-                         self::LOG_DEBUG);
+                self::LOG_DEBUG);
 
             return 0;
         }
@@ -364,7 +417,7 @@ note;
 
         $post_id = wp_insert_post($post_args);
         $this->write("Recorded transaction ({$title}) to Post ID: {$post_id}", self::LOG_DEBUG);
-    }
+    }*/
 
 }
 
