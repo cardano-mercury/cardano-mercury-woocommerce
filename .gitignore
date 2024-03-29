@@ -1,5 +1,6 @@
 /.idea/
-/vendor/**/README.md
+/vendor/**/*.md
+/vendor/**/*.txt
 /vendor/**/LICENSE
 /vendor/**/composer.json
 /vendor/**/.gitignore
