@@ -3,7 +3,7 @@
  * Plugin Name: Cardano Mercury Woocommerce
  * Plugin URI: https://github.com/cardano-mercury/mercury-woocommerce
  * Description: WooCommerce Cardano (ADA) Currency Plugin
- * Version: 2.1.1
+ * Version: 2.1.2
  * Author: Adam Dean
  * Author URI: https://github.com/cardano-mercury/
  * License: GNU General Public License v3.0
