@@ -40,7 +40,6 @@ dist/
 
 # Project files
 node_modules/
-vendor/
 
 # TypeScript files
 tsconfig.tsbuildinfo
@@ -55,7 +54,18 @@ package-lock.json
 tmp/
 
 # Composer
-vendor/
+/vendor/**/*.md
+/vendor/**/*.json
+/vendor/**/*.lock
+/vendor/**/LICENSE
+/vendor/bin
+/vendor/**/bin
+/vendor/**/docs
+/vendor/**/.github
+/vendor/**/.gitignore
+/vendor/**/.gitattributes
+/vendor/**/*.xml
+
 bin/composer/**/vendor/
 lib/vendor/
 contributors.md
