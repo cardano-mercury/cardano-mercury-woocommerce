@@ -91,7 +91,7 @@ class NativeAsset {
 
         add_filter('the_title', static function ($post_title, $post_id) {
             $the_post = get_post($post_id);
-            if ($the_post->post_type === self::mercury_native_asset_post_type) {
+            if ($the_post && $the_post->post_type === self::mercury_native_asset_post_type) {
                 return get_post_meta($post_id, 'ticker', true);
             }
 

@@ -1,0 +1,18 @@
+{
+	"name": "extension/woocommerce-gateway-cardano-mercury",
+	"description": "WooCommerce plugin",
+	"autoload": {
+		"psr-4": {
+			"WoocommerceGatewayCardanoMercury\\": "includes/"
+		}
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^9.0",
+		"automattic/jetpack-autoloader": "^2"
+	},
+	"config": {
+		"allow-plugins": {
+			"automattic/jetpack-autoloader": true
+		}
+	}
+}
