@@ -4,6 +4,8 @@ namespace WoocommerceGatewayCardanoMercury;
 
 use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType;
 use Exception;
+use Mercury\Fixer;
+use Mercury\Pricefeeder;
 
 class WC_Gateway_Mercury_Blocks_Support extends AbstractPaymentMethodType {
 
@@ -48,7 +50,7 @@ class WC_Gateway_Mercury_Blocks_Support extends AbstractPaymentMethodType {
 		if (!$rate) {
 			$apiKey = $this->get_setting('fixerioAPIKey');
 			$this->log->info("Fixer API Key: {$apiKey}", processing_log);
-			$Fixer = new \Mercury\Fixer($apiKey);
+			$Fixer = new Fixer($apiKey);
 			try {
 				$result = $Fixer->convert($fromCurr);
 			} catch (Exception $e) {
@@ -77,8 +79,8 @@ class WC_Gateway_Mercury_Blocks_Support extends AbstractPaymentMethodType {
 
 	public function get_payment_method_data() {
 		$curr          = get_woocommerce_currency();
-		$ADAPrice      = \Mercury\Pricefeeder::getAveragePrice()['price'];
-		$exchange_rate = 0;
+		$ADAPrice      = Pricefeeder::getAveragePrice()['price'];
+		$exchange_rate = 1;
 		switch ($curr) {
 			case 'ADA':
 			case 'USD':
