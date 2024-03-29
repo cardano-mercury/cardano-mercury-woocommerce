@@ -1,8 +1,7 @@
 <?php
-use Mercury\Blockfrost;
-use Mercury\NativeAsset;
-use Mercury\PaymentData;
-use Mercury\Transaction;
+namespace Mercury;
+
+use Exception;
 
 if (!defined('ABSPATH')) {
     die();
@@ -140,7 +139,7 @@ class TaskManager {
             return;
         }
 
-        $this->write("Looking for addresses to gather transactions for.", self::LOG_DEBUG);
+//        $this->write("Looking for addresses to gather transactions for.", self::LOG_DEBUG);
 
         $pending_orders = get_posts([
             'post_type'   => 'shop_order',
@@ -269,8 +268,8 @@ class TaskManager {
             ]);
 
             if (!empty($expired)) {
-                $this->write("EXPIRED ORDERS");
-                $this->write(wc_print_r($expired, true), self::LOG_DEBUG);
+//                $this->write("EXPIRED ORDERS");
+//                $this->write(wc_print_r($expired, true), self::LOG_DEBUG);
                 foreach ($expired as $order) {
                     $Order       = wc_get_order($order->ID);
                     $order_notes = <<<note

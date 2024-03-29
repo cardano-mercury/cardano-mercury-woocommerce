@@ -1,0 +1,12 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "extension/woocommerce-gateway-cardano-mercury",
+	"version": "0.1.0",
+	"title": "Woocommerce Gateway Cardano Mercury",
+	"category": "widgets",
+	"textdomain": "woocommerce-gateway-cardano-mercury",
+	"editorScript": "file:./build/index.js",
+	"editorStyle": "file:./build/index.css",
+	"style": "file:./build/style-index.css"
+}
